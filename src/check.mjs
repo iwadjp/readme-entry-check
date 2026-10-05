@@ -5,9 +5,12 @@ import { compareRelease, compareRegistry, compareGithubRepos, countCheckedReleas
 const H = {
   'User-Agent': 'readme-entry-check/0.0.1',
   Accept: 'application/vnd.github+json',
-  ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
 };
-const get = (url, headers = {}) => fetch(url, { headers: { ...H, ...headers } });
+const get = (url, headers = {}) => fetch(url, { headers: {
+  ...H, ...headers,
+  ...(new URL(url).origin === 'https://api.github.com' && process.env.GITHUB_TOKEN
+    ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
+} });
 
 export function parseRepo(arg) {
   const m = String(arg).match(/^(?:https?:\/\/github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:[/#?].*)?$/);

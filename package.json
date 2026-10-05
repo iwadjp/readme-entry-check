@@ -2,11 +2,13 @@
   "name": "readme-entry-check",
   "version": "0.0.1",
   "private": true,
-  "description": "v0 prototype: compare README install/download entry points with the actual GitHub release / npm / PyPI state (read-only, no AI).",
+  "description": "Read-only CLI that checks README entry points against GitHub releases, npm and PyPI.",
+  "license": "MIT",
   "type": "module",
   "bin": { "readme-entry-check": "src/cli.mjs" },
+  "engines": { "node": ">=22" },
   "scripts": {
-    "test": "node --test test/unit.test.mjs",
+    "test": "node --test test/unit.test.mjs test/security.test.mjs",
     "test:network": "node --test test/network.test.mjs"
   }
 }
