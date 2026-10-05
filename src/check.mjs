@@ -1,6 +1,6 @@
 // Network layer: GET only.
-import { extractNpm, extractPip, extractReleaseRefs } from './extract.mjs';
-import { compareRelease, compareRegistry, overall } from './compare.mjs';
+import { extractNpm, extractPip, extractReleaseRefs, extractGithubRefs } from './extract.mjs';
+import { compareRelease, compareRegistry, compareGithubRepos, countCheckedRelease, finalStatus } from './compare.mjs';
 
 const H = {
   'User-Agent': 'readme-entry-check/0.0.1',
@@ -33,7 +33,7 @@ export async function check(arg, { readmeText } = {}) {
     readmeText = await r.text();
   }
   const refs = extractReleaseRefs(readmeText, owner, repo);
-  const npm = extractNpm(readmeText), pip = extractPip(readmeText);
+  const npm = extractNpm(readmeText), pip = extractPip(readmeText), gh = extractGithubRefs(readmeText);
   const issues = [];
   let latest = null;
   if (refs.length) {
@@ -41,6 +41,11 @@ export async function check(arg, { readmeText } = {}) {
     if (r.ok) { const j = await r.json(); latest = { tag: j.tag_name, assets: (j.assets || []).map(a => a.name) }; }
     else if (r.status !== 404) issues.push({ status: 'ERROR', code: 'RELEASE_FETCH_FAILED', readme: '-', actual: `HTTP ${r.status}`, evidence: '' });
     issues.push(...compareRelease(refs, latest));
+  }
+  if (gh.length) {
+    const gs = {};
+    for (const g of gh) gs[g.repo] = (await get(`https://api.github.com/repos/${g.repo}`)).status;
+    issues.push(...compareGithubRepos(gh, gs));
   }
   if (npm.length || pip.length) {
     const own = await ownNames(owner, repo);
@@ -50,5 +55,6 @@ export async function check(arg, { readmeText } = {}) {
     for (const p of pip) ps[p.name] = await st(`https://pypi.org/pypi/${p.name}/json`);
     issues.push(...compareRegistry(npm, ns, own, 'npm'), ...compareRegistry(pip, ps, own, 'pypi'));
   }
-  return { repo: `${owner}/${repo}`, status: overall(issues), issues, summary: { releaseRefs: refs.length, npm: npm.length, pip: pip.length, latest: latest ? latest.tag : null } };
+  const checked = countCheckedRelease(refs, latest) + npm.length + pip.length + gh.length;
+  return { repo: `${owner}/${repo}`, status: finalStatus(issues, checked), issues, summary: { releaseRefs: refs.length, npm: npm.length, pip: pip.length, github: gh.length, checked, latest: latest ? latest.tag : null } };
 }

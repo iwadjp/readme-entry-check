@@ -62,6 +62,36 @@ export function compareRegistry(pkgs, statuses, ownNames, kind) {
   return issues;
 }
 
+export function compareGithubRepos(refs, statuses) {
+  const issues = [];
+  for (const r of refs) {
+    const s = statuses[r.repo];
+    if (s === 200) continue;
+    issues.push(s === 404
+      ? { status: D, code: 'GITHUB_REPO_NOT_FOUND', readme: r.repo, actual: 'GitHub API: 404 Not Found', evidence: `line ${r.line}: ${r.cmd}` }
+      : { status: 'ERROR', code: 'GITHUB_REPO_NOT_FOUND', readme: r.repo, actual: `GitHub API returned ${s}`, evidence: `line ${r.line}: ${r.cmd}` });
+  }
+  return issues;
+}
+
+// How many release references were actually compared (comparable version, latest release known).
+export function countCheckedRelease(refs, latest) {
+  if (!latest) return 0;
+  const assets = new Set(latest.assets || []);
+  let n = 0;
+  for (const r of refs) {
+    if (r.kind === 'file') { if (assets.has(r.file) || (parseVersion(r.file) && compareVersions(r.file, latest.tag) === -1 && assets.has(r.file.replace(parseVersion(r.file).join('.'), (parseVersion(latest.tag) || []).join('.'))))) n++; }
+    else if (compareVersions(r.tag, latest.tag) !== null) n++;
+  }
+  return n;
+}
+
+// OK only if something was actually checked; otherwise NOT_CHECKED.
+export function finalStatus(issues, checked) {
+  const o = overall(issues);
+  return o === 'OK' && !(checked > 0) ? 'NOT_CHECKED' : o;
+}
+
 export function overall(issues) {
   if (issues.some(i => i.status === 'ERROR')) return 'ERROR';
   if (issues.some(i => i.status === D)) return 'DRIFT';

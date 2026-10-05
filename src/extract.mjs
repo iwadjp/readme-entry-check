@@ -93,3 +93,18 @@ export function compareVersions(a, b) {
 export const INTENTIONAL_OLD = /(older|previous|legacy|archive|old version|alpha|beta|nightly|pre-?release|unstable|旧|過去|以前)/i;
 
 function dedupe(arr, key) { const s = new Set(); return arr.filter(x => !s.has(x[key]) && s.add(x[key])); }
+
+// `npx github:owner/repo[#ref]` / `npm i github:owner/repo` -> the referenced GitHub repo.
+const PLACEHOLDER_OWNER = /^(owner|user|username|you|your|org|me|example|account)([-_].*)?$/i;
+export function extractGithubRefs(text) {
+  const out = [], lines = text.split(/\r?\n/);
+  lines.forEach((line, i) => {
+    if (EXAMPLE_LINE.test(line) || (lines[i - 1] && EXAMPLE_LINE.test(lines[i - 1]))) return;
+    for (const m of line.matchAll(/\b(?:npx|npm\s+(?:install|i|add))\b[^\n`&|;#]*?\bgithub:([\w.-]+)\/([\w.-]+?)(?=[#\s`)"'&|;]|$)/g)) {
+      const [, owner, repo] = m;
+      if (PLACEHOLDER_OWNER.test(owner) || PLACEHOLDER.test(repo) || /^(repo|repository|package)$/i.test(repo)) continue;
+      out.push({ repo: `${owner}/${repo}`, line: i + 1, cmd: m[0].trim() });
+    }
+  });
+  return dedupe(out, 'repo');
+}

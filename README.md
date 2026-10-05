@@ -10,7 +10,7 @@ install/download with the actual public state:
 | `NPM_PACKAGE_NOT_FOUND` | `npm install` / `npx` names a package that is not on the npm registry |
 | `PYPI_PACKAGE_NOT_FOUND` | `pip` / `pipx install` names a package that is not on PyPI |
 
-Statuses: `OK`, `DRIFT` (confirmed), `AMBIGUOUS` (suspicious but intent unclear: intentionally older
+Statuses: `OK` (at least one entrypoint was actually checked and nothing was wrong), `NOT_CHECKED` (no supported entrypoint found; NOT judged OK), `DRIFT` (confirmed), `AMBIGUOUS` (suspicious but intent unclear: intentionally older
 version, third-party/bin name, filename outside a download context ...), `ERROR`.
 Precision is preferred over recall.
 

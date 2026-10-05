@@ -41,3 +41,14 @@ test('template-type repo is AMBIGUOUS, not DRIFT', async () => {
   assert.notEqual(r.status, 'DRIFT');
   assert.ok(codes(r).includes('NPM_PACKAGE_NOT_FOUND'));
 });
+
+test('npx github:owner/repo: existing repo -> OK, missing repo -> GITHUB_REPO_NOT_FOUND, no entrypoint -> NOT_CHECKED', async () => {
+  const ok = await check('iwadjp/ember', { readmeText: 'npx github:iwadjp/ember scan' });
+  assert.equal(ok.status, 'OK');
+  assert.equal(ok.summary.checked, 1);
+  const bad = await check('iwadjp/ember', { readmeText: 'npx github:iwadjp/this-repo-does-not-exist-xyz' });
+  assert.equal(bad.status, 'DRIFT');
+  assert.ok(codes(bad, 'DRIFT').includes('GITHUB_REPO_NOT_FOUND'));
+  const none = await check('iwadjp/ember', { readmeText: 'Run node tool.cjs' });
+  assert.equal(none.status, 'NOT_CHECKED');
+});

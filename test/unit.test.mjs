@@ -1,8 +1,8 @@
 // Pure unit tests (no network).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractNpm, extractPip, extractReleaseRefs, compareVersions, parseVersion } from '../src/extract.mjs';
-import { compareRelease, compareRegistry, overall } from '../src/compare.mjs';
+import { extractNpm, extractPip, extractReleaseRefs, extractGithubRefs, compareVersions, parseVersion } from '../src/extract.mjs';
+import { compareRelease, compareRegistry, compareGithubRepos, countCheckedRelease, finalStatus, overall } from '../src/compare.mjs';
 
 test('release URL extraction: download + tag, own repo only', () => {
   const md = [
@@ -127,6 +127,36 @@ test('compare: stale filename outside a download context -> AMBIGUOUS, inside ->
   assert.equal(a[0].status, 'AMBIGUOUS');
   const d = compareRelease([ref({ kind: 'file', file: 'app-v1.0.5.apk', ctx: 'Download app-v1.0.5.apk from Assets.' })], latest);
   assert.equal(d[0].status, 'DRIFT');
+});
+
+test('status: no entrypoint checked -> NOT_CHECKED; checked and clean -> OK', () => {
+  assert.equal(finalStatus([], 0), 'NOT_CHECKED');
+  assert.equal(finalStatus([], 1), 'OK');
+  assert.equal(finalStatus([{ status: 'DRIFT' }], 0), 'DRIFT');
+  assert.equal(finalStatus([{ status: 'AMBIGUOUS' }], 2), 'AMBIGUOUS');
+});
+
+test('checked count: comparable release refs only; none without latest', () => {
+  const l = { tag: 'v1.0.6', assets: ['app-v1.0.6.apk'] };
+  const refs = [{ kind: 'tag', tag: 'v1.0.6' }, { kind: 'tag', tag: 'nightly' }, { kind: 'file', file: 'Music_8.1.0.apk' }, { kind: 'file', file: 'app-v1.0.6.apk' }];
+  assert.equal(countCheckedRelease(refs, l), 2);
+  assert.equal(countCheckedRelease(refs, null), 0);
+});
+
+test('github: npx github:owner/repo extraction', () => {
+  const md = 'npx github:iwadjp/ember scan\nnpx -p github:iwadjp/ember ember-demo\nnpm i github:acme-co/tool#v1';
+  assert.deepEqual(extractGithubRefs(md).map(x => x.repo), ['iwadjp/ember', 'acme-co/tool']);
+});
+
+test('github: placeholders / examples are not extracted', () => {
+  const md = 'npx github:owner/repo\nnpx github:your-name/your-tool\nExample: npx github:acme/real-looking\nnpx github:user/package';
+  assert.deepEqual(extractGithubRefs(md), []);
+});
+
+test('github: repo exists -> no issue; 404 -> DRIFT GITHUB_REPO_NOT_FOUND; 500 -> ERROR', () => {
+  const refs = [{ repo: 'a/ok', line: 1, cmd: 'c' }, { repo: 'a/gone', line: 2, cmd: 'c' }, { repo: 'a/err', line: 3, cmd: 'c' }];
+  const r = compareGithubRepos(refs, { 'a/ok': 200, 'a/gone': 404, 'a/err': 500 });
+  assert.deepEqual(r.map(i => [i.readme, i.status, i.code]), [['a/gone', 'DRIFT', 'GITHUB_REPO_NOT_FOUND'], ['a/err', 'ERROR', 'GITHUB_REPO_NOT_FOUND']]);
 });
 
 test('overall status precedence', () => {
