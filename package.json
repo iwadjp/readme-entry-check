@@ -1,0 +1,12 @@
+{
+  "name": "readme-entry-check",
+  "version": "0.0.1",
+  "private": true,
+  "description": "v0 prototype: compare README install/download entry points with the actual GitHub release / npm / PyPI state (read-only, no AI).",
+  "type": "module",
+  "bin": { "readme-entry-check": "src/cli.mjs" },
+  "scripts": {
+    "test": "node --test test/unit.test.mjs",
+    "test:network": "node --test test/network.test.mjs"
+  }
+}
