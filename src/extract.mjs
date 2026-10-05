@@ -28,7 +28,7 @@ export function extractNpm(text) {
         const t = toks[k];
         if (t === '-p' || t === '--package') { const nx = toks[++k]; if (nx && bareNpmOk(nx)) out.push({ name: bareNpm(nx), line: i + 1, cmd: m[0].trim() }); break; }
         if (t.startsWith('-')) continue;
-        if (!bareNpmOk(t)) { if (isNpx) break; continue; }
+        if (!bareNpmOk(t)) break; // first non-package token ends the package list (prose, operators, urls ...)
         out.push({ name: bareNpm(t), line: i + 1, cmd: m[0].trim() });
         if (isNpx) break; // npx: first non-flag token is the package/bin
       }
@@ -50,7 +50,7 @@ export function extractPip(text) {
         const t = toks[k];
         if (ARGFLAGS.has(t)) { k++; continue; }
         if (t.startsWith('-')) continue;
-        if (!NAME_PIP.test(t)) continue;
+        if (!NAME_PIP.test(t)) break; // first non-package token ends the package list
         const name = t.replace(/\[.*$/, '').replace(/[=<>!~].*$/, '');
         if (PLACEHOLDER.test(name) || /^(git|http|https|requirements)$/i.test(name) || /\.(txt|toml|whl|gz)$/.test(name)) continue;
         out.push({ name, line: i + 1, cmd: m[0].trim() });

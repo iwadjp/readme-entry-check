@@ -165,3 +165,24 @@ test('overall status precedence', () => {
   assert.equal(overall([{ status: 'AMBIGUOUS' }, { status: 'DRIFT' }]), 'DRIFT');
   assert.equal(overall([{ status: 'DRIFT' }, { status: 'ERROR' }]), 'ERROR');
 });
+
+import fs from 'node:fs';
+const agentty = fs.readFileSync(new URL('../fixtures/agentty-prose-install.md', import.meta.url), 'utf8');
+
+test('regression (1ay1/agentty): prose after "npm install" is not parsed as packages', () => {
+  assert.deepEqual(extractNpm(agentty), []);
+  assert.deepEqual(extractPip(agentty), []);
+  assert.deepEqual(extractGithubRefs(agentty), []);
+  assert.equal(finalStatus([], extractNpm(agentty).length + extractPip(agentty).length), 'NOT_CHECKED');
+});
+
+test('package list stops at the first non-package token (npm and pip), valid packages before it are kept', () => {
+  assert.deepEqual(extractNpm('npm install alpha beta — gamma delta').map(x => x.name), ['alpha', 'beta']);
+  assert.deepEqual(extractPip('pip install alpha beta — gamma delta').map(x => x.name), ['alpha', 'beta']);
+  assert.deepEqual(extractNpm('npm install alpha beta && npm test').map(x => x.name), ['alpha', 'beta']);
+});
+
+test('existing valid forms still work: scoped, multiple, version specifiers, pip extras', () => {
+  assert.deepEqual(extractNpm('npm i -g @acme/widget@1.2.3 left-pad').map(x => x.name), ['@acme/widget', 'left-pad']);
+  assert.deepEqual(extractPip('pip install requests>=2.0 acme-lib[extra]==1.0 other').map(x => x.name), ['requests', 'acme-lib', 'other']);
+});

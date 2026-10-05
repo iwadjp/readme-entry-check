@@ -52,3 +52,10 @@ test('npx github:owner/repo: existing repo -> OK, missing repo -> GITHUB_REPO_NO
   const none = await check('iwadjp/ember', { readmeText: 'Run node tool.cjs' });
   assert.equal(none.status, 'NOT_CHECKED');
 });
+
+test('regression (1ay1/agentty prose): NOT_CHECKED with no AMBIGUOUS noise', async () => {
+  const r = await check('iwadjp/ember', { readmeText: fx('agentty-prose-install.md') });
+  assert.equal(r.status, 'NOT_CHECKED');
+  assert.equal(r.issues.length, 0);
+  assert.equal(r.summary.checked, 0);
+});
