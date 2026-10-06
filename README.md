@@ -44,6 +44,27 @@ node src/cli.mjs iwadjp/wol-light --readme-file ./fixtures/wollight-before-45205
 Use it with one repository: the same file is applied to every repository if you
 supply several. Paths are resolved from the current working directory.
 
+Repeat the option to check localized READMEs in one invocation:
+
+```sh
+node src/cli.mjs iwadjp/pixel-tag-drawer --readme-file README.md --readme-file README.ja.md
+```
+
+Files are checked separately in the specified order; multi-file output labels
+each result with its input filename, and finding line numbers refer to that file.
+Each distinct file is applied to every repository argument. With no option, the
+default README is still fetched; successful single-file output is unchanged.
+Paths normalized to the same absolute path are checked once (case-insensitive
+on Windows), retaining the first spelling. Symlink/hard-link aliases are not deduplicated.
+No glob expansion or automatic README discovery is performed; use explicit paths
+and quote filenames containing spaces. Shell-expanded globs are not a supported interface.
+
+An unreadable/missing file reports `ERROR / README_READ_FAILED`; a thrown check
+error reports `ERROR / CHECK_FAILED`. Other inputs are still checked. The whole
+invocation exits 2 if any input errors, otherwise 1 if any input has DRIFT,
+otherwise 0. AMBIGUOUS and NOT_CHECKED keep their existing exit-0 semantics.
+Each file checks public state independently, so multiple files may repeat API GETs.
+
 Illustrative output for a fictional repository (not a claim about a real project):
 
 ```text
@@ -91,8 +112,9 @@ count of unique installation methods or successful installations.
 - Exit 1: at least one DRIFT, without a reported ERROR.
 - Exit 2: at least one reported ERROR, or no repository argument.
 
-Malformed arguments, unreadable local files, or thrown transport errors can instead
-terminate with a Node.js exception and a nonzero exit code.
+Missing repository arguments or `--readme-file` values report usage and exit 2.
+Unreadable local files and thrown check/transport errors are reported per input
+as ERROR with exit 2; remaining inputs continue.
 
 ## Limitations
 

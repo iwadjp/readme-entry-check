@@ -1,4 +1,4 @@
-// Pure unit tests (no network).
+// Offline unit and CLI integration tests (no network).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { extractNpm, extractPip, extractReleaseRefs, extractGithubRefs, compareVersions, parseVersion } from '../src/extract.mjs';
@@ -185,4 +185,163 @@ test('package list stops at the first non-package token (npm and pip), valid pac
 test('existing valid forms still work: scoped, multiple, version specifiers, pip extras', () => {
   assert.deepEqual(extractNpm('npm i -g @acme/widget@1.2.3 left-pad').map(x => x.name), ['@acme/widget', 'left-pad']);
   assert.deepEqual(extractPip('pip install requests>=2.0 acme-lib[extra]==1.0 other').map(x => x.name), ['requests', 'acme-lib', 'other']);
+});
+
+// Offline CLI integration: run the real entrypoint with public GETs stubbed in the child.
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const cliUrl = new URL('../src/cli.mjs', import.meta.url).href;
+const readmeFor = (version) => `Download [APK](https://github.com/iwadjp/pixel-tag-drawer/releases/download/v${version}/pixel-tag-drawer-v${version}.apk)\n`;
+const cliBootstrap = `
+  const [cli, ...args] = process.argv.slice(1);
+  process.argv = [process.execPath, cli, ...args];
+  globalThis.fetch = async (url, options) => {
+    if ((options.method ?? 'GET') !== 'GET') throw new Error('Unexpected non-GET');
+    if (url.endsWith('/releases/latest')) return Response.json({
+      tag_name: 'v0.1.6', assets: [{ name: 'pixel-tag-drawer-v0.1.6.apk' }]
+    });
+    if (url.endsWith('/readme')) return new Response(${JSON.stringify(readmeFor('0.1.6'))});
+    throw new Error('Unexpected offline request: ' + url);
+  };
+  await import(cli);
+`;
+
+function cliFixture(t, versions = ['0.1.6', '0.1.6']) {
+  const fixtureParent = path.resolve(os.tmpdir());
+  const cwd = fs.mkdtempSync(path.join(fixtureParent, 'readme-cli-'));
+  assert.equal(path.dirname(cwd), fixtureParent);
+  assert.match(path.basename(cwd), /^readme-cli-/);
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  for (const [index, name] of ['README.md', 'README.ja.md'].entries()) {
+    fs.writeFileSync(path.join(cwd, name), readmeFor(versions[index]));
+  }
+  return cwd;
+}
+
+function runCli(cwd, args) {
+  const result = spawnSync(process.execPath,
+    ['--input-type=module', '--eval', cliBootstrap, '--', cliUrl, ...args],
+    { cwd, encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.error, undefined);
+  return result;
+}
+
+const repoArg = 'iwadjp/pixel-tag-drawer';
+const twoReadmes = [repoArg, '--readme-file', 'README.md', '--readme-file', 'README.ja.md'];
+
+test('CLI single --readme-file preserves the existing successful output', (t) => {
+  const r = runCli(cliFixture(t), [repoArg, '--readme-file', 'README.md']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'OK  iwadjp/pixel-tag-drawer  (checked entrypoints: 2; release refs 2, npm 0, pip 0, github: 0; latest v0.1.6)\n');
+});
+
+test('CLI without --readme-file still fetches the default README', (t) => {
+  const r = runCli(cliFixture(t), [repoArg]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^OK  iwadjp\/pixel-tag-drawer /);
+});
+
+for (const [label, versions, expectedCode, expectedStatuses] of [
+  ['two README files both OK', ['0.1.6', '0.1.6'], 0, ['OK', 'OK']],
+  ['first OK / second stale', ['0.1.6', '0.1.5'], 1, ['OK', 'DRIFT']],
+  ['first stale / second OK', ['0.1.5', '0.1.6'], 1, ['DRIFT', 'OK']],
+  ['both stale', ['0.1.5', '0.1.5'], 1, ['DRIFT', 'DRIFT']],
+]) {
+  test(`CLI localized README pair: ${label}`, (t) => {
+    const r = runCli(cliFixture(t, versions), twoReadmes);
+    assert.equal(r.status, expectedCode, r.stderr);
+    const rows = r.stdout.split('\n').filter(line => /^(OK|DRIFT)  /.test(line));
+    assert.equal(rows.length, 2, r.stdout);
+    assert.match(rows[0], new RegExp(`^${expectedStatuses[0]}  .*README.md`));
+    assert.match(rows[1], new RegExp(`^${expectedStatuses[1]}  .*README.ja.md`));
+    assert.equal((r.stdout.match(/STALE_RELEASE_VERSION/g) || []).length,
+      expectedStatuses.filter(s => s === 'DRIFT').length);
+    assert.match(r.stdout, /SUMMARY \(2 README checks across 1 repo\)/);
+  });
+}
+
+test('CLI nonexistent path is identified, other README still checked, ERROR wins over DRIFT', (t) => {
+  const r = runCli(cliFixture(t, ['0.1.5', '0.1.6']),
+    [repoArg, '--readme-file', 'missing.md', '--readme-file', 'README.md']);
+  assert.equal(r.status, 2);
+  assert.match(r.stdout, /^ERROR  .*missing.md/m);
+  assert.match(r.stdout, /README_READ_FAILED/);
+  assert.match(r.stdout, /^DRIFT  .*README.md/m);
+  assert.match(r.stdout, /STALE_RELEASE_VERSION/);
+});
+
+test('CLI duplicate normalized paths are checked once', (t) => {
+  const r = runCli(cliFixture(t),
+    [repoArg, '--readme-file', 'README.md', '--readme-file', './README.md']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal((r.stdout.match(/^OK  /gm) || []).length, 1);
+  assert.doesNotMatch(r.stdout, /SUMMARY/);
+});
+
+test('CLI paths with spaces and Japanese characters work without shell expansion', (t) => {
+  const cwd = cliFixture(t);
+  fs.writeFileSync(path.join(cwd, 'README 日本語.md'), readmeFor('0.1.6'));
+  const r = runCli(cwd, [repoArg, '--readme-file', 'README.md', '--readme-file', 'README 日本語.md']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^OK  .*README 日本語.md/m);
+});
+
+test('CLI single local file still applies to every repository argument', (t) => {
+  const r = runCli(cliFixture(t), [repoArg, repoArg, '--readme-file', 'README.md']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal((r.stdout.match(/^OK  /gm) || []).length, 2);
+  assert.match(r.stdout, /SUMMARY \(2 repos\)/);
+});
+
+test('CLI missing --readme-file value fails with exit 2', (t) => {
+  const r = runCli(cliFixture(t), [repoArg, '--readme-file']);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--readme-file requires a path/);
+});
+
+test('CLI missing path after another option does not consume that option', (t) => {
+  const r = runCli(cliFixture(t), [repoArg, '--readme-file', '--readme-file', 'README.md']);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--readme-file requires a path/);
+  assert.equal(r.stdout, '');
+});
+
+test('CLI missing second file cannot hide behind a successful first file', (t) => {
+  const r = runCli(cliFixture(t), [repoArg, '--readme-file', 'README.md', '--readme-file', 'missing.md']);
+  assert.equal(r.status, 2);
+  assert.match(r.stdout, /^OK  .*README.md/m);
+  assert.match(r.stdout, /^ERROR  .*missing.md/m);
+});
+
+test('CLI multiple local files apply to every repo and count README checks', (t) => {
+  const r = runCli(cliFixture(t), [repoArg, repoArg, ...twoReadmes.slice(1)]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal((r.stdout.match(/^OK  /gm) || []).length, 4);
+  assert.match(r.stdout, /SUMMARY \(4 README checks across 2 repos\)/);
+});
+
+test('CLI Windows path case variants are deduplicated', { skip: process.platform !== 'win32' }, (t) => {
+  const r = runCli(cliFixture(t), [repoArg, '--readme-file', 'README.md', '--readme-file', 'readme.MD']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal((r.stdout.match(/^OK  /gm) || []).length, 1);
+});
+
+test('CLI thrown check errors do not prevent checking later repository inputs', (t) => {
+  const r = runCli(cliFixture(t), ['not-a-repo', repoArg, '--readme-file', 'README.md']);
+  assert.equal(r.status, 2);
+  assert.match(r.stdout, /^ERROR  not-a-repo/m);
+  assert.match(r.stdout, /CHECK_FAILED/);
+  assert.match(r.stdout, /^OK  iwadjp\/pixel-tag-drawer/m);
+});
+
+test('CLI multi-file NOT_CHECKED keeps the existing exit-0 semantics', (t) => {
+  const cwd = cliFixture(t);
+  fs.writeFileSync(path.join(cwd, 'README.ja.md'), '# 説明だけ\n');
+  const r = runCli(cwd, twoReadmes);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^OK  .*README.md/m);
+  assert.match(r.stdout, /^NOT_CHECKED  .*README.ja.md/m);
+  assert.match(r.stdout, /NOT judged as OK/);
 });
